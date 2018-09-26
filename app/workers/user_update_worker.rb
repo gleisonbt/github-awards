@@ -1,5 +1,6 @@
 class UserUpdateWorker
   include Sidekiq::Worker
+
   sidekiq_options throttle: { threshold: 5000, period: 1.hour }
 
   def perform(login, include_repo=false)
@@ -13,7 +14,10 @@ class UserUpdateWorker
       raise error
     end
     
-    result = github_client.get(:user, login)
+    #result = github_client.get(:user, login)
+    result = Github::User.find(login)
+    result_type = Github::User.type
+  
     if result.nil?
       Rails.logger.error "User not found : #{login}"
       return 
@@ -24,17 +28,22 @@ class UserUpdateWorker
     update_user(user, result)
     
     if include_repo
-      url = "https://api.github.com/users/#{user.login}/repos?per_page=100"
-      url += "&access_token=#{github_token}" if github_token
-      resp = HTTParty.get(url).body
-      
-      unless resp.nil?
-        repos = JSON.parse(resp)
-        repos.each do |repo|
-          #perform synchronously to be sure all repos are updating when we compute rank
-          RepositoryUpdateWorker.new.perform(user.id, repo["name"])
-        end
+      # url = "https://api.github.com/users/#{user.login}/repos?per_page=100"
+      # url += "&access_token=#{github_token}" if github_token
+      # resp = HTTParty.get(url).body
+      repos = Github::User.find_repos_user(user.login) 
+      repos.each do |repo|
+        #perform synchronously to be sure all repos are updating when we compute rank
+        RepositoryUpdateWorker.new.perform(user.id, repo.name)
       end
+
+      # unless resp.nil?
+      #   repos = JSON.parse(resp)
+      #   repos.each do |repo|
+      #     #perform synchronously to be sure all repos are updating when we compute rank
+      #     RepositoryUpdateWorker.new.perform(user.id, repo["name"])
+      #   end
+      # end
     end
 
     if user.location.present?
@@ -46,15 +55,18 @@ class UserUpdateWorker
   end
   
   def update_user(user, result)
-    user.name = result["name"]
-    user.github_id = result["id"]
-    user.login = result["login"].downcase if result["login"]
-    user.company = result["company"]
-    user.location = result["location"]
-    user.blog = result["blog"]
-    user.email = result["email"]
-    user.gravatar_url = result["avatar_url"]
-    user.organization = result["type"]=="Organization"
+    user.name = result.name
+    user.github_id = result.id
+    user.login = result.login.downcase if result.login
+    user.company = nil
+    if Github::User.type=="User"
+      user.company = result.company
+    end
+    user.location = result.location
+    user.blog = result.website_url
+    user.email = result.email
+    user.gravatar_url = result.avatar_url
+    user.organization = Github::User.type=="Organization"
     user.processed = true
     user.save
   end

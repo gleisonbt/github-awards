@@ -7,7 +7,8 @@ class RepositoryUpdateWorker
     user = User.find(user_id)
     github_token = user.token || ENV['GITHUB_TOKEN']
 
-    result = Models::GithubClient.new(github_token).get(:repo, {owner: user.login, repo: name})
+    #result = Models::GithubClient.new(github_token).get(:repo, {owner: user.login, repo: name})
+    result = Github::Repository.find(:repo, :login)
     repo = user.repositories.where(name: name).first_or_initialize
     if result.nil?
       Rails.logger.error "Repo not found : #{repo}"
@@ -20,11 +21,11 @@ class RepositoryUpdateWorker
   end
   
   def update_repo(repo, result)
-    repo.name = result["name"]
-    repo.github_id = result["id"]
-    repo.forked = result["fork"] || false
-    repo.stars = result["watchers"]
-    repo.language = result["language"]
+    repo.name = result.name
+    repo.github_id = result.id
+    repo.forked = result.is_fork
+    repo.stars = result.stargazers.total_count
+    repo.language = result.primary_language.name
     repo.save
   end
 end
